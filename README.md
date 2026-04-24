@@ -80,23 +80,48 @@ python app/cli.py decrypt-text <ciphertext_hex> <iv_hex> <key_hex>
 python app/cli.py agent-info
 ```
 
-## API Endpoints
+## Purpose
 
-Base URL: `http://localhost:8000`
+AudioKey is built to make encryption key generation more practical and user-driven by deriving keys from audio content instead of manually managed passwords or key files.
 
-- `GET /api/health`
-- `GET /api/capabilities`
-- `POST /api/generate-key`
-- `POST /api/generate-key-async`
-- `GET /api/generate-key-async/{job_id}`
-- `POST /api/encrypt`
-- `POST /api/decrypt`
-- `GET /api/keys`
-- `POST /api/keys`
-- `PUT /api/keys/{key_id}`
-- `DELETE /api/keys/{key_id}`
-- `GET /api/logs`
-- `DELETE /api/logs`
+Primary goals:
+
+- Derive deterministic 256-bit keys from audio features.
+- Evaluate whether a segment is suitable for key generation before use.
+- Provide both CLI and web-based workflows for real usage.
+- Keep generated key operations auditable with local key-vault and usage logs.
+
+## Potential Use Cases
+
+- Personal secure notes or file snippets where users prefer audio-based keying material.
+- Classroom/lab demonstrations of AI + cybersecurity integration.
+- Prototyping adaptive key selection pipelines using audio quality signals.
+- Local-first secure tooling where keys are not hardcoded in scripts.
+- Research baselines for comparing rule-based vs model-assisted key quality assessment.
+
+## Agentic AI Feature Usage
+
+AudioKey includes an agentic quality-evaluation loop that runs before final key selection.
+
+How it works:
+
+1. The input audio is normalized, segmented, and converted to spectrogram/features.
+2. Each segment is evaluated by the agent using expert rules and optional `AudioKeyCNN` inference.
+3. The workflow compares segment reports and selects the best candidate.
+4. A final decision package is produced, including quality, confidence, risk factors, and recommendations.
+5. Key derivation runs on the selected segment.
+
+What you see in practice:
+
+- CLI: `python app/cli.py generate-key <audio_file>` prints quality results, risk factors, and recommendations before key output.
+- CLI (with trace): running generation with evaluation shows agent trace entries for decision stages.
+- Backend workflow: the same agentic pipeline is used by the FastAPI service, including asynchronous job progression and decision metadata.
+
+Why it matters:
+
+- Reduces weak-segment key generation.
+- Gives explainability (decision + confidence + risks) instead of opaque key output.
+- Supports fallback behavior: if no pretrained model is available, rule-based evaluation still works.
 
 ## Model Training
 
