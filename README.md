@@ -99,7 +99,7 @@ Primary goals:
 - Local-first secure tooling where keys are not hardcoded in scripts.
 - Research baselines for comparing rule-based vs model-assisted key quality assessment.
 
-## Agentic AI Feature Usage
+## Evaluation
 
 AudioKey includes an agentic quality-evaluation loop that runs before final key selection.
 
