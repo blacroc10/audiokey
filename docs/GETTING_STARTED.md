@@ -56,6 +56,29 @@ python app/cli.py generate-key path/to/audio.wav --pin "mypin123"
 python app/cli.py agent-info
 ```
 
+### 5. Launch Web API + React Frontend
+
+Start the Python API server:
+
+```bash
+uvicorn app.api:app --reload --port 8000
+```
+
+In a second terminal, start the React frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Then open the Vite URL shown in the terminal (usually `http://localhost:5173`).
+
+The web app lets you:
+- Upload audio and generate a key from the existing backend pipeline
+- Inspect quality score, decision, and recommendations
+- Encrypt/decrypt text via API-backed AES operations
+
 ## Project Structure
 
 ```
@@ -76,8 +99,13 @@ audiokey/
 │   │   - KeyQualityRules: Expert system rules
 │   │   - KeyEvaluationWorkflow: Orchestrates the pipeline
 │
-├── app/                     # User-facing interface
-│   └── cli.py               # Command-line interface
+├── app/                     # Backend interfaces
+│   ├── cli.py               # Command-line interface
+│   └── api.py               # FastAPI server for web frontend
+│
+├── frontend/                # Vite + React web UI
+│   ├── src/App.jsx
+│   └── src/styles.css
 │
 ├── data/                    # Data storage
 │   ├── raw/                 # Original audio files

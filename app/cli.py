@@ -120,6 +120,8 @@ class AudioKeyCLI:
             print(f"   Best segment quality: {best_report.quality_level.name}")
             print(f"   Confidence: {best_report.confidence:.2%}")
             print(f"   Decision: {best_report.decision}")
+            print(f"   Next action: {pipeline_result['next_action']}")
+            print(f"   Retry recommended: {pipeline_result['retry_recommended']}")
             
             if best_report.risk_factors:
                 print(f"\n   ⚠ Risk Factors:")
@@ -130,6 +132,15 @@ class AudioKeyCLI:
                 print(f"\n   💡 Recommendations:")
                 for rec in best_report.recommendations:
                     print(f"      - {rec}")
+
+            if pipeline_result.get('agent_trace'):
+                print(f"\n   🔎 Agent Trace:")
+                for step in pipeline_result['agent_trace']:
+                    detail = step.get('detail')
+                    line = f"      - [{step.get('stage')}] {step.get('message')}"
+                    if detail:
+                        line += f" :: {detail}"
+                    print(line)
             
             # Use best segment
             best_idx = pipeline_result['best_segment_index']

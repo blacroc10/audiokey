@@ -23,6 +23,17 @@ python app/cli.py agent-info
 python app/cli.py generate-key path/to/audio.wav --evaluate
 ```
 
+### 5. Run Web Frontend
+```bash
+# terminal 1 (API backend)
+uvicorn app.api:app --reload --port 8000
+
+# terminal 2 (React frontend)
+cd frontend
+npm install
+npm run dev
+```
+
 ---
 
 ## **Mini Project: AudioKey – Security‑Based AI System for Audio‑Derived Encryption Keys (Open‑Source Framework)**

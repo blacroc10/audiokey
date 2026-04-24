@@ -40,6 +40,9 @@ class KeyEvaluationReport:
     ml_model_confidence: float
     timestamp: str
     decision: str  # "ACCEPT" or "REJECT"
+    next_action: str
+    retry_recommended: bool
+    agent_trace: List[Dict[str, str]]
 
 
 class KeyQualityRules:
@@ -126,6 +129,73 @@ class AudioKeyAgent:
         self.evaluation_history: List[KeyEvaluationReport] = []
         self.rules_engine = KeyQualityRules()
         self.agent_name = "AudioKeyQualityAgent"
+
+    @staticmethod
+    def _trace_step(stage: str, message: str, detail: Optional[str] = None) -> Dict[str, str]:
+        step = {
+            "stage": stage,
+            "message": message,
+            "time": datetime.now().isoformat(),
+        }
+        if detail:
+            step["detail"] = detail
+        return step
+
+    @staticmethod
+    def _feature_summary(features: Dict[str, float]) -> str:
+        return (
+            f"energy={features.get('energy', 0):.4f}, "
+            f"rms={features.get('rms_energy', 0):.4f}, "
+            f"centroid={features.get('spectral_centroid', 0):.4f}, "
+            f"rolloff={features.get('spectral_rolloff', 0):.4f}, "
+            f"zcr={features.get('zero_crossing_rate', 0):.4f}"
+        )
+
+    def _build_plan(self, analysis_result: AudioAnalysisResult, user_pin: Optional[str]) -> List[str]:
+        features = analysis_result.features
+        plan = [
+            "Observe audio features and build a quality snapshot",
+            "Score rule-based quality signals",
+            "Consult the ML model if it is available",
+            "Review whether the first pass is strong enough to accept",
+        ]
+
+        if features.get("energy", 0) <= 0:
+            plan.append("Fallback early because the segment has no usable energy")
+        elif features.get("zero_crossing_rate", 0) < 0.08:
+            plan.append("Pay extra attention to complexity and segment diversity")
+
+        if user_pin:
+            plan.append("Bind the final key to the user PIN for stronger entropy")
+
+        return plan
+
+    def _review_decision(
+        self,
+        combined_score: float,
+        risk_factors: List[str],
+        ml_prediction: str,
+        ml_confidence: float,
+    ) -> Tuple[bool, str, List[str]]:
+        reviewer_notes = []
+        retry_recommended = False
+
+        if combined_score < 0.5:
+            retry_recommended = True
+            reviewer_notes.append("Score is below the safe acceptance band.")
+        elif combined_score < 0.7 and risk_factors:
+            retry_recommended = True
+            reviewer_notes.append("Borderline confidence plus risks suggests another segment should be tested.")
+        else:
+            reviewer_notes.append("The decision is strong enough to proceed.")
+
+        if ml_prediction == "Error":
+            reviewer_notes.append("ML step failed, so the agent fell back to expert rules.")
+        elif ml_prediction not in {"Good", "Weak", "Unknown"}:
+            reviewer_notes.append(f"ML prediction returned {ml_prediction} with confidence {ml_confidence:.2f}.")
+
+        next_action = "retry_with_another_segment" if retry_recommended else "generate_key"
+        return retry_recommended, next_action, reviewer_notes
     
     def evaluate_audio_segment(
         self,
@@ -148,13 +218,18 @@ class AudioKeyAgent:
         recommendations = []
         risk_factors = []
         scores = {}
-        
-        # Apply expert system rules
+        agent_trace = []
+
         features = analysis_result.features
+        plan = self._build_plan(analysis_result, user_pin)
+
+        agent_trace.append(self._trace_step("observe", "Captured audio feature snapshot.", self._feature_summary(features)))
+        agent_trace.append(self._trace_step("plan", "Constructed evaluation plan.", " -> ".join(plan)))
         
         # Rule 1: Energy Distribution
         energy_score, energy_reason = self.rules_engine.check_energy_distribution(features)
         scores['energy'] = energy_score
+        agent_trace.append(self._trace_step("rule", "Energy distribution scored.", f"score={energy_score:.2f}; {energy_reason}"))
         
         if energy_score < 0.5:
             risk_factors.append(f"Energy: {energy_reason}")
@@ -163,6 +238,7 @@ class AudioKeyAgent:
         # Rule 2: Spectral Diversity
         diversity_score, diversity_reason = self.rules_engine.check_spectral_diversity(features)
         scores['diversity'] = diversity_score
+        agent_trace.append(self._trace_step("rule", "Spectral diversity scored.", f"score={diversity_score:.2f}; {diversity_reason}"))
         
         if diversity_score < 0.6:
             risk_factors.append(f"Diversity: {diversity_reason}")
@@ -171,12 +247,14 @@ class AudioKeyAgent:
         # Rule 3: Zero Crossing Rate
         zcr_score, zcr_reason = self.rules_engine.check_zero_crossing_rate(features)
         scores['zcr'] = zcr_score
+        agent_trace.append(self._trace_step("rule", "Complexity scored via zero-crossing rate.", f"score={zcr_score:.2f}; {zcr_reason}"))
         
         if zcr_score < 0.5:
             recommendations.append("Use audio with more complexity (speech or music)")
         
         # Combine rule-based scores
         rule_based_score = np.mean(list(scores.values()))
+        agent_trace.append(self._trace_step("aggregate", "Aggregated rule-based score.", f"score={rule_based_score:.2f}"))
         
         # Get ML model prediction if available
         ml_prediction = "Unknown"
@@ -188,15 +266,27 @@ class AudioKeyAgent:
                     analysis_result.spectrogram,
                     device='cpu'
                 )
+                agent_trace.append(self._trace_step("model", "ML model consulted.", f"prediction={ml_prediction}; confidence={ml_confidence:.2f}"))
             except Exception as e:
                 print(f"ML model prediction failed: {e}")
                 ml_prediction = "Error"
                 ml_confidence = 0.0
+                agent_trace.append(self._trace_step("model", "ML model failed; using rule fallback.", str(e)))
+        else:
+            agent_trace.append(self._trace_step("model", "No ML model loaded; using expert rules only."))
         
         # Decision logic: combine expert system and ML model
         # Expert system weight: 0.6, ML model weight: 0.4
-        ml_numeric_score = 0.9 if ml_prediction == "Good" else 0.5
+        if ml_prediction == "Good":
+            ml_numeric_score = 0.9
+        elif ml_prediction == "Weak":
+            ml_numeric_score = 0.35
+        elif ml_prediction == "Error":
+            ml_numeric_score = 0.4
+        else:
+            ml_numeric_score = 0.5
         combined_score = (rule_based_score * 0.6) + (ml_numeric_score * 0.4)
+        agent_trace.append(self._trace_step("act", "Combined rule and model signals into a decision score.", f"score={combined_score:.2f}"))
         
         # Determine quality level and decision
         if combined_score >= 0.8:
@@ -221,12 +311,26 @@ class AudioKeyAgent:
             decision = "REJECT"
             risk_factors.append("Critical: Very low quality score")
             recommendations.append("Please select a different audio file (music, speech, or varied noise)")
+
+        retry_recommended, next_action, reviewer_notes = self._review_decision(
+            combined_score,
+            risk_factors,
+            ml_prediction,
+            ml_confidence,
+        )
+        agent_trace.append(self._trace_step("review", "Performed a self-check on the decision.", " | ".join(reviewer_notes)))
+
+        if retry_recommended and decision == "ACCEPT" and quality_level in {KeyQualityLevel.FAIR, KeyQualityLevel.WEAK}:
+            recommendations.append("Agent review suggests testing another segment before finalizing.")
         
         # Additional recommendations based on PIN usage
         if user_pin:
             recommendations.append("✓ PIN + audio combination will further enhance security")
         else:
             recommendations.append("💡 Consider adding a PIN for additional security")
+        
+        if next_action == "retry_with_another_segment":
+            recommendations.append("Agentic next action: retry with another segment and compare the outcome.")
         
         # Create evaluation report
         report = KeyEvaluationReport(
@@ -237,7 +341,10 @@ class AudioKeyAgent:
             ml_model_prediction=ml_prediction,
             ml_model_confidence=ml_confidence,
             timestamp=timestamp,
-            decision=decision
+            decision=decision,
+            next_action=next_action,
+            retry_recommended=retry_recommended,
+            agent_trace=agent_trace,
         )
         
         # Store in history
@@ -291,8 +398,9 @@ class AudioKeyAgent:
             'agent_name': self.agent_name,
             'total_evaluations': len(self.evaluation_history),
             'has_ml_model': self.ml_model is not None,
-            'architecture': 'Expert System + ML Hybrid',
-            'rules': ['energy_distribution', 'spectral_diversity', 'zero_crossing_rate']
+            'architecture': 'Observe-Plan-Act-Review Agent',
+            'rules': ['energy_distribution', 'spectral_diversity', 'zero_crossing_rate'],
+            'agentic_loop': ['observe', 'plan', 'act', 'review'],
         }
 
 
@@ -343,5 +451,8 @@ class KeyEvaluationWorkflow:
             'best_report': best_report,
             'accepted_segments': accepted_count,
             'total_segments': total_count,
-            'recommendation': best_report.recommendations[0] if best_report.recommendations else "Evaluation complete"
+            'recommendation': best_report.recommendations[0] if best_report.recommendations else "Evaluation complete",
+            'agent_trace': best_report.agent_trace,
+            'next_action': best_report.next_action,
+            'retry_recommended': best_report.retry_recommended,
         }
